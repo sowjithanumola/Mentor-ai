@@ -1,0 +1,7 @@
+{
+  "name": "Mentor AI",
+  "description": "A friendly and supportive virtual mentor designed to help students learn effectively through personalized explanations, quizzes, and study plans.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
