@@ -18,7 +18,6 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Sync state with Supabase Session
   const syncUserFromSession = (session: any) => {
     if (session?.user) {
       setUser({
@@ -32,13 +31,11 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    // Initial Session Check
     supabase.auth.getSession().then(({ data: { session } }) => {
       syncUserFromSession(session);
       setIsInitialized(true);
     });
 
-    // Listen for Auth Changes (Login, Logout, Token Refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       syncUserFromSession(session);
       if (!session) {
@@ -50,7 +47,6 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch Sessions from Supabase when user is logged in
   useEffect(() => {
     if (user) {
       const fetchSessions = async () => {
@@ -76,7 +72,6 @@ const App: React.FC = () => {
     }
   }, [user]);
 
-  // Fetch messages for active session
   useEffect(() => {
     if (activeSession && activeSession.messages.length === 0) {
       const fetchMessages = async () => {
@@ -165,26 +160,35 @@ const App: React.FC = () => {
       setActiveSession(currentSession);
     }
 
-    const userMessage = {
-      session_id: currentSession.id,
-      role: 'user',
-      content: text,
-      timestamp: Date.now()
+    const timestamp = Date.now();
+    const optimisticUserMsg: Message = { 
+      id: 'temp-u-' + timestamp,
+      role: 'user', 
+      content: text, 
+      timestamp 
     };
 
-    const optimisticUserMsg: Message = { ...userMessage, id: 'temp-' + Date.now() } as any;
     setActiveSession(prev => prev ? { ...prev, messages: [...prev.messages, optimisticUserMsg] } : null);
-
-    await supabase.from('messages').insert([userMessage]);
     setIsLoading(true);
 
     try {
+      // Send message to Supabase
+      await supabase.from('messages').insert([{
+        session_id: currentSession.id,
+        role: 'user',
+        content: text,
+        timestamp: timestamp
+      }]);
+
+      // Call AI
       const aiResponseText = await generateMentorResponse(text, currentSession.messages, level);
+      
+      const aiTimestamp = Date.now();
       const aiMessage = {
         session_id: currentSession.id,
         role: 'model',
         content: aiResponseText,
-        timestamp: Date.now(),
+        timestamp: aiTimestamp,
       };
 
       const { data: aiData, error: aiError } = await supabase.from('messages').insert([aiMessage]).select().single();
@@ -200,9 +204,28 @@ const App: React.FC = () => {
           ...prev, 
           messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
         } : null);
+      } else if (aiResponseText) {
+        // Fallback for storage issues
+        const finalAiMsg: Message = {
+          id: 'error-' + aiTimestamp,
+          role: 'model',
+          content: aiResponseText,
+          timestamp: aiTimestamp
+        };
+        setActiveSession(prev => prev ? { 
+          ...prev, 
+          messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
+        } : null);
       }
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      console.error("HandleSendMessage Error:", error);
+      const errorMsg: Message = {
+        id: 'error-' + Date.now(),
+        role: 'model',
+        content: "I'm having trouble connecting to my knowledge base. Please check your internet connection or API settings.",
+        timestamp: Date.now()
+      };
+      setActiveSession(prev => prev ? { ...prev, messages: [...prev.messages, errorMsg] } : null);
     } finally {
       setIsLoading(false);
     }
