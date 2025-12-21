@@ -2,14 +2,22 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { StudentLevel, Message } from './types';
 
-// Fix: Strictly use named parameter for apiKey and rely exclusively on process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Initialize the AI client. We use a getter or check to handle potential undefined process.env safely.
+const getAIClient = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.warn("Gemini API Key is missing. AI features will not work.");
+  }
+  return new GoogleGenAI({ apiKey: apiKey || 'MISSING_KEY' });
+};
 
 export const generateMentorResponse = async (
   prompt: string,
   history: Message[],
   level: StudentLevel
 ): Promise<string> => {
+  const ai = getAIClient();
+  
   const systemInstruction = `
     You are Mentor AI, a friendly, intelligent, and supportive virtual mentor designed to help students learn effectively.
     
@@ -45,7 +53,6 @@ export const generateMentorResponse = async (
   `;
 
   try {
-    // Fix: Use ai.chats.create for natural conversational flow
     const chat = ai.chats.create({
       model: 'gemini-3-flash-preview',
       config: {
@@ -54,7 +61,6 @@ export const generateMentorResponse = async (
       },
     });
 
-    // Fix: Extract generated text via the .text property as per guidelines
     const response: GenerateContentResponse = await chat.sendMessage({ message: prompt });
     return response.text || "I'm sorry, I couldn't generate a response. Let's try that again!";
   } catch (error) {

@@ -27,7 +27,11 @@
         background: #cbd5e1;
       }
     </style>
-  <script type="importmap">
+    <script>
+      // Shim process.env for the browser to prevent crashes when accessing API keys
+      window.process = window.process || { env: {} };
+    </script>
+    <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@^19.2.3",
@@ -38,9 +42,11 @@
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.45.4"
   }
 }
-</script>
-</head>
+    </script>
+  </head>
   <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
+    <!-- Explicitly load the entry point -->
+    <script type="module" src="index.tsx"></script>
   </body>
 </html>
