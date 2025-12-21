@@ -2,21 +2,13 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { StudentLevel, Message } from './types';
 
-// Initialize the AI client. We use a getter or check to handle potential undefined process.env safely.
-const getAIClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    console.warn("Gemini API Key is missing. AI features will not work.");
-  }
-  return new GoogleGenAI({ apiKey: apiKey || 'MISSING_KEY' });
-};
-
 export const generateMentorResponse = async (
   prompt: string,
   history: Message[],
   level: StudentLevel
 ): Promise<string> => {
-  const ai = getAIClient();
+  // Always create a fresh instance to ensure the latest API key from environment is used
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const systemInstruction = `
     You are Mentor AI, a friendly, intelligent, and supportive virtual mentor designed to help students learn effectively.
@@ -26,45 +18,50 @@ export const generateMentorResponse = async (
     Goals:
     - Explain concepts in a simple, clear, and student-friendly way.
     - Adapt explanations based on the student's level (${level}).
-    - Encourage curiosity, confidence, and critical thinking.
-    - Give real-world examples whenever possible.
-    - Motivate students instead of just giving answers.
+    - Encourage curiosity and critical thinking.
+    - Ask guiding questions instead of just giving answers immediately.
     
-    Rules:
-    - If a student is confused, re-explain using simpler words or examples.
-    - Ask guiding questions instead of directly solving everything.
-    - Keep responses short and clear unless the student asks for details.
-    - Be polite, positive, and encouraging.
-    - Never discourage learning or judge mistakes.
-    
-    Capabilities:
-    - Help with school subjects (Maths, Science, English, Computer Science, etc.).
-    - Create study plans and revision schedules.
-    - Explain coding concepts with examples.
-    - Generate quizzes and practice questions.
-    - Help students prepare for exams.
-    
-    Personality:
-    - Calm, friendly, and motivating.
-    - Acts like a teacher + senior student combined.
-    - Uses simple language suitable for school students.
+    Formatting:
+    - Use Markdown for bolding, lists, and headers.
+    - If explaining math or code, use clear formatting.
     
     Always end your response with exactly: "Would you like an example, a quiz, or a simpler explanation?"
   `;
 
+  // Prepare the content array including history
+  const contents = [
+    ...history.map(m => ({
+      role: m.role,
+      parts: [{ text: m.content }]
+    })),
+    {
+      role: 'user',
+      parts: [{ text: prompt }]
+    }
+  ];
+
   try {
-    const chat = ai.chats.create({
+    const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
+      contents: contents as any, // Cast to any to handle library type nuances
       config: {
         systemInstruction,
         temperature: 0.7,
+        topP: 0.95,
+        topK: 40,
       },
     });
 
-    const response: GenerateContentResponse = await chat.sendMessage({ message: prompt });
-    return response.text || "I'm sorry, I couldn't generate a response. Let's try that again!";
-  } catch (error) {
-    console.error("Gemini API Error:", error);
+    const text = response.text;
+    if (!text) throw new Error("Empty response from AI");
+    return text;
+  } catch (error: any) {
+    console.error("Gemini API Detailed Error:", error);
+    
+    if (error.message?.includes('API_KEY_INVALID') || !process.env.API_KEY) {
+      return "I can't access my brain right now! Please make sure the API_KEY environment variable is set correctly in Vercel settings.";
+    }
+    
     return "Oops! I encountered an error. Please check your connection or try again later.";
   }
 };
