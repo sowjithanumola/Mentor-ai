@@ -1,13 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { Menu, GraduationCap, Sparkles, Loader2 } from 'lucide-react';
-import { StudentLevel, Message, ChatSession, User } from './types';
-import { generateMentorResponse } from './geminiService';
+import { Menu, GraduationCap, Sparkles, Loader2, BookOpen } from 'lucide-react';
+import { StudentLevel, Message, ChatSession, User, Quiz } from './types';
+import { generateMentorResponse, generateQuiz, playTextToSpeech } from './geminiService';
 import { supabase } from './lib/supabase';
 import Sidebar from './components/Sidebar';
 import ChatContainer from './components/ChatContainer';
 import WelcomeHero from './components/WelcomeHero';
 import AuthScreen from './AuthScreen';
+import QuizModal from './components/QuizModal';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -17,6 +18,8 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false);
 
   const syncUserFromSession = (session: any) => {
     if (session?.user) {
@@ -134,7 +137,24 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleStartQuiz = async () => {
+    if (!activeSession || activeSession.messages.length < 2) {
+      alert("We need a bit more conversation to generate a relevant quiz! Try asking me a few questions first.");
+      return;
+    }
+    setIsGeneratingQuiz(true);
+    try {
+      const quiz = await generateQuiz(activeSession.messages, level);
+      setActiveQuiz(quiz);
+    } catch (err) {
+      console.error(err);
+      alert("Oops! Failed to generate the quiz. Let's try chatting a bit more first.");
+    } finally {
+      setIsGeneratingQuiz(false);
+    }
+  };
+
+  const handleSendMessage = async (text: string, isVoice: boolean = false) => {
     if (!text.trim() || !user) return;
 
     let currentSession = activeSession;
@@ -172,7 +192,6 @@ const App: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // Send message to Supabase
       await supabase.from('messages').insert([{
         session_id: currentSession.id,
         role: 'user',
@@ -180,7 +199,6 @@ const App: React.FC = () => {
         timestamp: timestamp
       }]);
 
-      // Call AI
       const aiResponseText = await generateMentorResponse(text, currentSession.messages, level);
       
       const aiTimestamp = Date.now();
@@ -204,8 +222,12 @@ const App: React.FC = () => {
           ...prev, 
           messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
         } : null);
+
+        // Auto-speak if the user used voice input
+        if (isVoice && aiResponseText) {
+          playTextToSpeech(aiResponseText);
+        }
       } else if (aiResponseText) {
-        // Fallback for storage issues
         const finalAiMsg: Message = {
           id: 'error-' + aiTimestamp,
           role: 'model',
@@ -216,6 +238,8 @@ const App: React.FC = () => {
           ...prev, 
           messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
         } : null);
+        
+        if (isVoice) playTextToSpeech(aiResponseText);
       }
     } catch (error: any) {
       console.error("HandleSendMessage Error:", error);
@@ -273,6 +297,10 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/40 z-40 lg:hidden backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />
       )}
 
+      {activeQuiz && (
+        <QuizModal quiz={activeQuiz} onClose={() => setActiveQuiz(null)} />
+      )}
+
       <Sidebar 
         user={user}
         onLogout={handleLogout}
@@ -307,6 +335,16 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex items-center gap-4">
+             {activeSession && activeSession.messages.length >= 2 && (
+               <button 
+                 onClick={handleStartQuiz}
+                 disabled={isGeneratingQuiz}
+                 className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-50 text-indigo-600 rounded-full text-xs md:text-sm font-bold border border-indigo-100 transition-all hover:bg-indigo-100 disabled:opacity-50"
+               >
+                 {isGeneratingQuiz ? <Loader2 className="animate-spin" size={14} /> : <BookOpen size={14} />}
+                 <span>{isGeneratingQuiz ? 'Generating...' : 'Take Quiz'}</span>
+               </button>
+             )}
              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 rounded-full text-slate-600 text-xs md:text-sm font-semibold">
                <Sparkles size={14} className="text-amber-500" />
                <span className="hidden sm:inline">Difficulty:</span> {level}

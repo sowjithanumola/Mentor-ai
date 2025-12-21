@@ -24,6 +24,19 @@ export interface ChatSession {
   createdAt: number;
 }
 
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+}
+
+export interface Quiz {
+  title: string;
+  questions: QuizQuestion[];
+}
+
 export enum Subject {
   Mathematics = 'Mathematics',
   Science = 'Science',
