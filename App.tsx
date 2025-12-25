@@ -122,15 +122,30 @@ const App: React.FC = () => {
       .single();
 
     if (!error && data) {
+      const initialGreeting = `Hello! I'm Mentor AI, your virtual guide for ${subject || 'learning'}. I was created by Sowjith Anumola to help you master any subject. What shall we explore together today?`;
+      
+      const { data: msgData } = await supabase.from('messages').insert([{
+        session_id: data.id,
+        role: 'model',
+        content: initialGreeting,
+        timestamp: Date.now()
+      }]).select().single();
+
       const newSession: ChatSession = {
         id: data.id,
         userId: data.user_id,
         title: data.title,
-        messages: [],
+        messages: msgData ? [{
+          id: msgData.id,
+          role: 'model',
+          content: msgData.content,
+          timestamp: msgData.timestamp
+        }] : [],
         level: data.level,
         subject: data.subject,
         createdAt: new Date(data.created_at).getTime(),
       };
+      
       setSessions(prev => [newSession, ...prev]);
       setActiveSession(newSession);
       setIsSidebarOpen(false);
@@ -160,6 +175,7 @@ const App: React.FC = () => {
     let currentSession = activeSession;
     
     if (!currentSession) {
+      // If user starts by typing/speaking in a null session, create one with a proactive "Hello" first
       const newSessionData = {
         user_id: user.id,
         title: text.length > 30 ? text.substring(0, 30) + '...' : text,
@@ -168,11 +184,25 @@ const App: React.FC = () => {
       };
       const { data, error } = await supabase.from('sessions').insert([newSessionData]).select().single();
       if (error || !data) return;
+      
+      const helloMsg = `Hello! I'm Mentor AI, created by Sowjith Anumola. Let's get started with your question.`;
+      const { data: helloData } = await supabase.from('messages').insert([{
+        session_id: data.id,
+        role: 'model',
+        content: helloMsg,
+        timestamp: Date.now()
+      }]).select().single();
+
       currentSession = {
         id: data.id,
         userId: data.user_id,
         title: data.title,
-        messages: [],
+        messages: helloData ? [{
+          id: helloData.id,
+          role: 'model',
+          content: helloData.content,
+          timestamp: helloData.timestamp
+        }] : [],
         level: data.level,
         createdAt: new Date(data.created_at).getTime(),
       };
@@ -223,7 +253,6 @@ const App: React.FC = () => {
           messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
         } : null);
 
-        // Auto-speak if the user used voice input
         if (isVoice && aiResponseText) {
           playTextToSpeech(aiResponseText);
         }
