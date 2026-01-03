@@ -152,30 +152,12 @@ const App: React.FC = () => {
     }
   };
 
-  const handleStartQuiz = async () => {
-    if (!activeSession || activeSession.messages.length < 2) {
-      alert("We need a bit more conversation to generate a relevant quiz! Try asking me a few questions first.");
-      return;
-    }
-    setIsGeneratingQuiz(true);
-    try {
-      const quiz = await generateQuiz(activeSession.messages, level);
-      setActiveQuiz(quiz);
-    } catch (err) {
-      console.error(err);
-      alert("Oops! Failed to generate the quiz. Let's try chatting a bit more first.");
-    } finally {
-      setIsGeneratingQuiz(false);
-    }
-  };
-
   const handleSendMessage = async (text: string, isVoice: boolean = false) => {
     if (!text.trim() || !user) return;
 
     let currentSession = activeSession;
     
     if (!currentSession) {
-      // If user starts by typing/speaking in a null session, create one with a proactive "Hello" first
       const newSessionData = {
         user_id: user.id,
         title: text.length > 30 ? text.substring(0, 30) + '...' : text,
@@ -211,64 +193,78 @@ const App: React.FC = () => {
     }
 
     const timestamp = Date.now();
+    const tempUserId = 'temp-u-' + timestamp;
     const optimisticUserMsg: Message = { 
-      id: 'temp-u-' + timestamp,
+      id: tempUserId,
       role: 'user', 
       content: text, 
       timestamp 
     };
 
-    setActiveSession(prev => prev ? { ...prev, messages: [...prev.messages, optimisticUserMsg] } : null);
+    // Show user message immediately
+    setActiveSession(prev => prev ? { 
+      ...prev, 
+      messages: [...prev.messages, optimisticUserMsg] 
+    } : null);
     setIsLoading(true);
 
     try {
-      await supabase.from('messages').insert([{
+      // 1. Save user message to database
+      const { data: userData, error: userError } = await supabase.from('messages').insert([{
         session_id: currentSession.id,
         role: 'user',
         content: text,
         timestamp: timestamp
-      }]);
+      }]).select().single();
 
+      if (userError) throw userError;
+
+      // Update state to use the real database ID for the user message
+      const persistentUserMsg: Message = {
+        id: userData.id,
+        role: 'user',
+        content: userData.content,
+        timestamp: userData.timestamp
+      };
+
+      // 2. Get AI Response
       const aiResponseText = await generateMentorResponse(text, currentSession.messages, level);
       
       const aiTimestamp = Date.now();
-      const aiMessage = {
+      const { data: aiData, error: aiError } = await supabase.from('messages').insert([{
         session_id: currentSession.id,
         role: 'model',
         content: aiResponseText,
         timestamp: aiTimestamp,
+      }]).select().single();
+
+      if (aiError) throw aiError;
+
+      const persistentAiMsg: Message = {
+        id: aiData.id,
+        role: 'model',
+        content: aiData.content,
+        timestamp: aiData.timestamp
       };
 
-      const { data: aiData, error: aiError } = await supabase.from('messages').insert([aiMessage]).select().single();
-
-      if (!aiError && aiData) {
-        const finalAiMsg: Message = {
-          id: aiData.id,
-          role: 'model',
-          content: aiData.content,
-          timestamp: aiData.timestamp
+      // Final state update: remove ALL temp messages and ensure both permanent user and AI messages are present
+      setActiveSession(prev => {
+        if (!prev) return null;
+        // Remove the temporary message that started this turn
+        const historyWithoutTemp = prev.messages.filter(m => m.id !== tempUserId);
+        // Ensure the persistent user message is in history if it wasn't already updated
+        const historyWithUser = historyWithoutTemp.some(m => m.id === persistentUserMsg.id) 
+          ? historyWithoutTemp 
+          : [...historyWithoutTemp, persistentUserMsg];
+          
+        return {
+          ...prev,
+          messages: [...historyWithUser, persistentAiMsg]
         };
-        setActiveSession(prev => prev ? { 
-          ...prev, 
-          messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
-        } : null);
+      });
 
-        if (isVoice && aiResponseText) {
-          playTextToSpeech(aiResponseText);
-        }
-      } else if (aiResponseText) {
-        const finalAiMsg: Message = {
-          id: 'error-' + aiTimestamp,
-          role: 'model',
-          content: aiResponseText,
-          timestamp: aiTimestamp
-        };
-        setActiveSession(prev => prev ? { 
-          ...prev, 
-          messages: [...prev.messages.filter(m => !m.id.startsWith('temp-')), finalAiMsg] 
-        } : null);
-        
-        if (isVoice) playTextToSpeech(aiResponseText);
+      if (isVoice && aiResponseText) {
+        playTextToSpeech(aiResponseText);
       }
     } catch (error: any) {
       console.error("HandleSendMessage Error:", error);
@@ -301,6 +297,23 @@ const App: React.FC = () => {
         setSessions([]);
         setActiveSession(null);
       }
+    }
+  };
+
+  const handleStartQuiz = async () => {
+    if (!activeSession || activeSession.messages.length < 2) {
+      alert("We need a bit more conversation to generate a relevant quiz! Try asking me a few questions first.");
+      return;
+    }
+    setIsGeneratingQuiz(true);
+    try {
+      const quiz = await generateQuiz(activeSession.messages, level);
+      setActiveQuiz(quiz);
+    } catch (err) {
+      console.error(err);
+      alert("Oops! Failed to generate the quiz. Let's try chatting a bit more first.");
+    } finally {
+      setIsGeneratingQuiz(false);
     }
   };
 
